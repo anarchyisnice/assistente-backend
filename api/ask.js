@@ -1,6 +1,10 @@
-// api/ask.js - Backend per Vercel
+// api/ask.js - Backend per Vercel con Groq AI
 // Memoria temporanea per i promemoria (in produzione usare un database)
 let promemoria = [];
+
+// Configurazione Groq (inserisci la tua API key nelle variabili d'ambiente Vercel)
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 export default async function handler(req, res) {
   // Abilita CORS per tutti i domini
@@ -25,11 +29,46 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Messaggio richiesto' });
     }
 
-    // Processa il messaggio come assistente AI
-    const risposta = processaRichiestaAI(message.trim());
+    // Controlla se è una richiesta di promemoria
+    if (isRichiestaPromemoria(message.toLowerCase())) {
+      const nuovoPromemoria = creaPromemoria(message);
+      promemoria.push(nuovoPromemoria);
+      
+      const messaggioPromemoria = `✅ Promemoria salvato!\n📌 ${nuovoPromemoria.titolo}\n🕒 ${new Date(nuovoPromemoria.data).toLocaleString('it-IT')}`;
+      
+      return res.status(200).json({ 
+        reply: messaggioPromemoria,
+        type: 'promemoria',
+        status: 'success' 
+      });
+    }
+    
+    // Controlla se vuole vedere i promemoria
+    if (isRichiestaVisualizzaPromemoria(message.toLowerCase())) {
+      const listaPromemoria = visualizzaPromemoria();
+      return res.status(200).json({ 
+        reply: listaPromemoria,
+        type: 'lista_promemoria',
+        status: 'success' 
+      });
+    }
+    
+    // Controlla se vuole eliminare promemoria
+    if (isRichiestaEliminaPromemoria(message.toLowerCase())) {
+      const risultato = eliminaPromemoria(message);
+      return res.status(200).json({ 
+        reply: risultato,
+        type: 'elimina_promemoria',
+        status: 'success' 
+      });
+    }
+
+    // Per tutto il resto, usa Groq AI
+    const rispostaAI = await chiamaGroqAI(message);
     
     return res.status(200).json({ 
-      reply: risposta,
+      reply: rispostaAI,
+      type: 'ai_response',
       status: 'success' 
     });
 
@@ -42,40 +81,61 @@ export default async function handler(req, res) {
   }
 }
 
-function processaRichiestaAI(messaggio) {
-  const msg = messaggio.toLowerCase();
-  
-  // 1. GESTIONE PROMEMORIA - Riconosce quando l'utente vuole creare un promemoria
-  if (isRichiestaPromemoria(msg)) {
-    const nuovoPromemoria = creaPromemoria(messaggio);
-    promemoria.push(nuovoPromemoria);
-    
-    return JSON.stringify({
-      tipo: 'promemoria_creato',
-      titolo: nuovoPromemoria.titolo,
-      data: nuovoPromemoria.data,
-      messaggio: `✅ Promemoria salvato!\n📌 ${nuovoPromemoria.titolo}\n🕒 ${new Date(nuovoPromemoria.data).toLocaleString('it-IT')}`
+async function chiamaGroqAI(messaggio) {
+  if (!GROQ_API_KEY) {
+    return "⚠️ API Key di Groq non configurata. Aggiungi GROQ_API_KEY nelle variabili d'ambiente di Vercel.";
+  }
+
+  try {
+    const response = await fetch(GROQ_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            role: "system",
+            content: `Sei un assistente AI personale chiamato "Assistente 🧌". Sei amichevole, utile e parli in italiano. 
+
+Oltre a rispondere normalmente alle domande, hai una funzione speciale per i promemoria:
+- Se l'utente vuole creare un promemoria, digli di usare frasi come "ricordami di..." o "promemoria per..."
+- Se chiede dei suoi promemoria salvati, digli di scrivere "mostra promemoria" o "i miei promemoria"
+- Mantieni sempre un tono amichevole e professionale
+- Rispondi in modo conciso ma completo`
+          },
+          {
+            role: "user",
+            content: messaggio
+          }
+        ],
+        model: "llama-3.1-70b-versatile", // Modello Groq veloce e potente
+        temperature: 0.7,
+        max_tokens: 1000,
+        top_p: 1,
+        stream: false
+      })
     });
+
+    if (!response.ok) {
+      throw new Error(`Groq API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.choices[0].message.content;
+
+  } catch (error) {
+    console.error('Errore chiamata Groq:', error);
+    return "Mi dispiace, al momento non riesco a connettermi al servizio AI. Riprova tra poco!";
   }
-  
-  // 2. VISUALIZZA PROMEMORIA
-  if (isRichiestaVisualizzaPromemoria(msg)) {
-    return visualizzaPromemoria();
-  }
-  
-  // 3. ELIMINA PROMEMORIA
-  if (isRichiestaEliminaPromemoria(msg)) {
-    return eliminaPromemoria(messaggio);
-  }
-  
-  // 4. CHAT NORMALE - Risposte come assistente AI
-  return rispondiComeAI(messaggio);
 }
 
 function isRichiestaPromemoria(msg) {
   const keywordsPromemoria = [
     'ricordami', 'promemoria', 'reminder', 'ricorda di', 'non dimenticare',
-    'devo ricordare', 'appuntamento', 'nota che', 'salva che', 'memo'
+    'devo ricordare', 'appuntamento', 'nota che', 'salva che', 'memo',
+    'aggiungi al calendario', 'segna che'
   ];
   return keywordsPromemoria.some(keyword => msg.includes(keyword));
 }
@@ -83,13 +143,15 @@ function isRichiestaPromemoria(msg) {
 function isRichiestaVisualizzaPromemoria(msg) {
   const keywordsVedi = [
     'i miei promemoria', 'mostra promemoria', 'promemoria salvati', 
-    'cosa devo ricordare', 'che promemoria ho', 'lista promemoria'
+    'cosa devo ricordare', 'che promemoria ho', 'lista promemoria',
+    'vedi promemoria', 'calendari', 'appuntamenti salvati'
   ];
   return keywordsVedi.some(keyword => msg.includes(keyword));
 }
 
 function isRichiestaEliminaPromemoria(msg) {
-  return msg.includes('elimina promemoria') || msg.includes('cancella promemoria');
+  return msg.includes('elimina promemoria') || msg.includes('cancella promemoria') || 
+         msg.includes('rimuovi promemoria');
 }
 
 function creaPromemoria(testo) {
@@ -165,73 +227,4 @@ function eliminaPromemoria(messaggio) {
     }
   }
   return "❌ Promemoria non trovato. Usa 'elimina promemoria 1' per eliminare il primo della lista.";
-}
-
-function rispondiComeAI(messaggio) {
-  const msg = messaggio.toLowerCase();
-  
-  // Saluti
-  if (msg.includes('ciao') || msg.includes('salve') || msg.includes('buongiorno') || msg.includes('buonasera')) {
-    const saluti = [
-      "Ciao! 🧌 Come posso aiutarti oggi?",
-      "Salve! Sono qui per assisterti. Cosa ti serve?",
-      "Ciao! Sono il tuo assistente personale. Posso aiutarti con promemoria o rispondere alle tue domande!",
-      "Buongiorno! 🌟 Come va? Posso fare qualcosa per te?"
-    ];
-    return saluti[Math.floor(Math.random() * saluti.length)];
-  }
-  
-  // Domande su di sé
-  if (msg.includes('chi sei') || msg.includes('cosa sei') || msg.includes('come ti chiami')) {
-    return "Sono il tuo assistente personale 🧌! Posso aiutarti a gestire promemoria, rispondere a domande e chattare con te. Cosa ti serve?";
-  }
-  
-  // Aiuto
-  if (msg.includes('aiuto') || msg.includes('help') || msg.includes('cosa puoi fare')) {
-    return `🧌 Ecco cosa posso fare per te:
-
-📝 **Promemoria**: 
-- "Ricordami di comprare il latte domani alle 18:00"
-- "Promemoria appuntamento medico martedì"
-
-📋 **Gestione**:
-- "Mostra i miei promemoria"
-- "Elimina promemoria 1"
-
-💬 **Chat**: Posso rispondere a domande e chattare normalmente!
-
-Cosa ti serve?`;
-  }
-  
-  // Come stai
-  if (msg.includes('come stai') || msg.includes('come va')) {
-    return "Sto bene, grazie! 😊 Sono sempre pronto ad aiutarti. Tu come stai?";
-  }
-  
-  // Matematica semplice
-  if (msg.includes('+') || msg.includes('-') || msg.includes('*') || msg.includes('/')) {
-    try {
-      // Rimuovi spazi e caratteri non numerici/operatori
-      const espressione = messaggio.replace(/[^0-9+\-*/().\s]/g, '');
-      if (espressione.match(/^[\d+\-*/().\s]+$/)) {
-        const risultato = eval(espressione);
-        return `🧮 ${espressione} = ${risultato}`;
-      }
-    } catch (e) {
-      return "Non riesco a calcolare questa espressione. Prova con operazioni più semplici!";
-    }
-  }
-  
-  // Risposte generiche intelligenti
-  const risposteGeneriche = [
-    "Interessante! Dimmi di più su questo argomento.",
-    "Capisco quello che dici. Hai bisogno di aiuto con qualcosa di specifico?",
-    "Hmm, fammi pensare... Puoi fornirmi più dettagli?",
-    "È un punto di vista interessante! Come posso assisterti al meglio?",
-    "Grazie per avermi detto questo. C'è qualcosa in particolare che vuoi sapere?",
-    "Sono qui per aiutarti! Se hai domande specifiche o vuoi creare promemoria, dimmi pure.",
-    "Mi fa piacere chattare con te! Hai bisogno di assistenza con qualcosa?"
-  ];
-  
-  return risposteGeneriche[Math.floor(Math.random() * risposteGeneriche.length)];
 }
