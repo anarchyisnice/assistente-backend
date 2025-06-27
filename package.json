@@ -8,7 +8,9 @@
     "build": "echo 'No build step required'",
     "start": "echo 'Use vercel dev for local development'"
   },
-  "dependencies": {},
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  },
   "devDependencies": {
     "vercel": "^32.0.0"
   },
