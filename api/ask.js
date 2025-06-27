@@ -18,9 +18,9 @@ export default async function handler(req, res) {
 
   try {
     const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
+      'https://openrouter.ai/api/v1/chat/completions',
       {
-        model: 'mixtral-8x7b-32768',
+        model: 'mistralai/mistral-7b-instruct',
         messages: [
           {
             role: 'system',
@@ -36,7 +36,9 @@ export default async function handler(req, res) {
       {
         headers: {
           Authorization: `Bearer ${GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://assistente.replit.dev', // modifica questo se usi un tuo dominio
+          'X-Title': 'AssistenteBot' // opzionale ma consigliato
         }
       }
     );
