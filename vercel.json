@@ -1,9 +1,33 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "api/ask.js", "use": "@vercel/node" }
-  ],
+  "functions": {
+    "api/ask.js": {
+      "runtime": "@vercel/node"
+    }
+  },
   "routes": [
-    { "src": "/api/ask", "dest": "api/ask.js" }
+    {
+      "src": "/api/ask",
+      "dest": "/api/ask.js"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, PUT, DELETE, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "X-Requested-With, Content-Type, Authorization"
+        }
+      ]
+    }
   ]
 }
